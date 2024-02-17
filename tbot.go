@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	// "context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,15 +12,22 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
+
+	// "regexp"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
+	// "github.com/tmc/langchaingo/llms"
+	// "github.com/tmc/langchaingo/llms/ollama"
 )
 
 const (
-	server      = "irc.chat.twitch.tv"
-	port        = "6667"
+	server      = "irc.chat.twitch.tv:6667"
+	ttsModel    = "tts_models/en/ljspeech/vits"
+	llmModel    = "mistral"
 	redirectUri = "http://localhost:7776/auth/callback"
 )
 
@@ -176,6 +184,16 @@ func getRewards(userId string) []Reward {
 	return rewardRequest.Data
 }
 
+func toCamelCase(input string) string {
+	parts := strings.Split(input, "-")
+	for i, part := range parts {
+		if i > 0 {
+			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return strings.Join(parts, "")
+}
+
 func main() {
 
 	user := os.Getenv("TWITCH_USER")
@@ -184,6 +202,23 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+
+	// llm, err := ollama.New(ollama.WithModel(llmModel))
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	//
+	// response := ""
+	// dataSet := "{}"
+	//
+	// streamingFn := llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+	// 	response += string(chunk)
+	// 	if len(chunk) == 0 {
+	// 		dataSet = response
+	// 		response = ""
+	// 	}
+	// 	return nil
+	// })
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +283,21 @@ func main() {
 
 	fmt.Println(string(rewardsJson))
 
-	conn, err := net.Dial("tcp", server+":"+port)
+	ttsCmd := exec.Command("tts-server", "--use_cuda", "true", "--model_name", ttsModel)
+	ttsErr := ttsCmd.Start()
+	if ttsErr != nil {
+		log.Fatal(ttsErr)
+	}
+
+	for {
+		resp, err := http.Head("http://localhost:5002")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+
+	conn, err := net.Dial("tcp", server)
 	if err != nil {
 		fmt.Printf("Failed to connect: %v\n", err)
 		return
@@ -261,6 +310,8 @@ func main() {
 	fmt.Fprintf(conn, "NICK %s\r\n", user)
 	fmt.Fprintf(conn, "JOIN #%s\r\n", user)
 
+	// msgRegex := regexp.MustCompile("PRIV1MSG|JO1IN|PA1RT")
+
 	go func() {
 		scanner := bufio.NewScanner(conn)
 		for scanner.Scan() {
@@ -270,7 +321,82 @@ func main() {
 			if strings.HasPrefix(line, "PING") {
 				pongMsg := strings.Replace(line, "PING", "PONG", 1)
 				fmt.Fprintf(conn, "%s\r\n", pongMsg)
+			} else if strings.Contains(line, "PRIVMSG") {
+
+				parts := strings.SplitN(line, " PRIVMSG #awayto :", 2)
+				payload := parts[0]
+				message := parts[1]
+				contents := make(map[string]string)
+				payloadItems := strings.Split(payload[1:], ";")
+
+				for _, item := range payloadItems {
+					keyValue := strings.SplitN(item, "=", 2)
+					key := keyValue[0]
+					value := keyValue[1]
+					contents[toCamelCase(key)] = value
+				}
+
+				_ = message
+
+				rewardId, exists := contents["customRewardId"]
+				if exists {
+					println(rewardId)
+
+					var currentReward Reward
+
+					for _, reward := range rewards {
+						if reward.ID == rewardId {
+							currentReward = reward
+						}
+					}
+
+					println("reward: " + currentReward.Title)
+
+					if currentReward.Title == "TTS" {
+
+						wavName := "wavs/" + contents["id"] + ".wav"
+						wavFile, err := os.Create(wavName)
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						defer wavFile.Close()
+
+						data := url.Values{}
+						data.Set("text", message)
+
+						resp, _ := http.Get("http://localhost:5002/api/tts?" + data.Encode())
+						println(resp.Status)
+
+						_, err = io.Copy(wavFile, resp.Body)
+						if err != nil {
+							log.Fatal(err)
+						}
+
+						aplayCmd := exec.Command("aplay", "-i", wavName)
+						if err := aplayCmd.Run(); err != nil {
+							log.Fatal(err)
+						}
+
+					}
+
+				}
+
 			}
+			// else if msgRegex.MatchString(line) {
+			// 	prompt := "Respond only with a valid JSON object representing the cumulative information received from any messages given after this prompt. Your response will be immediately parsed with json.Unmarshal into a generic Golang interface; therefore it is imperative that your response is only valid JSON. The JSON response is an object tracking the messages coming from an IRC chatroom. We need to know who is currently in the room and how many messages they have sent."
+			// 	prompt += " The current JSON object is: " + dataSet
+			// 	prompt += " And the next message to process is: " + line
+			//
+			// 	llmCtx := context.Background()
+			//
+			// 	completion, err := llms.GenerateFromSinglePrompt(llmCtx, llm, prompt, llms.WithTemperature(0.8), streamingFn)
+			// 	if err != nil {
+			// 		log.Fatal(err)
+			// 	}
+			//
+			// 	_ = completion
+			// }
 		}
 	}()
 
@@ -282,9 +408,25 @@ func main() {
 		}
 	}()
 
+	// ticker := time.NewTicker(30 * time.Second)
+	// quit := make(chan struct{})
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case <-ticker.C:
+	// 			println(dataSet)
+	// 		case <-quit:
+	// 			ticker.Stop()
+	// 			return
+	// 		}
+	// 	}
+	// }()
+
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
+
+	// close(quit)
 
 	fmt.Println("Exiting...")
 }

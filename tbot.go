@@ -412,7 +412,8 @@ func main() {
 							Stream   bool      `json:"stream"`
 						}{
 							Messages: []Message{
-								{Role: "system", Content: "All prompts will be quickly and concisely responded to."},
+								// {Role: "system", Content: "Maximum response length: 20 words. Please provide query."},
+								{Role: "system", Content: "All responses will be minimally worded. Please provide query."},
 								{Role: "user", Content: message},
 							},
 							Model:  "mistral",
@@ -448,8 +449,11 @@ func main() {
 							log.Fatal(err)
 						}
 
-						speak(chatRequest.Message.Content)
-						print("LLM:" + chatRequest.Message.Content)
+						m := chatRequest.Message.Content
+
+						fmt.Fprintf(conn, "PRIVMSG #%s :%s\r\n", user, m)
+
+						speak(m)
 					}
 
 				}

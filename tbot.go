@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+
 	// "context"
 	"encoding/json"
 	"errors"
@@ -31,6 +33,14 @@ const (
 	redirectUri = "http://localhost:7776/auth/callback"
 )
 
+var commands = map[string][]string{
+	"tts": {"tts", "t", "talk", "say", "v"},
+}
+
+var adminCommands = map[string][]string{
+	"ask": {"a"},
+}
+
 type Cred struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -51,6 +61,19 @@ type Reward struct {
 
 type RewardRequest struct {
 	Data []Reward `json:"data"`
+}
+
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ChatMessage struct {
+	Content string `json:"content"`
+}
+
+type ChatRequest struct {
+	Message ChatMessage `json:"message"`
 }
 
 func getTokenBody(data url.Values) {
@@ -194,6 +217,15 @@ func toCamelCase(input string) string {
 	return strings.Join(parts, "")
 }
 
+func contains(a []string, s string) bool {
+	for _, e := range a {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
 
 	user := os.Getenv("TWITCH_USER")
@@ -326,6 +358,15 @@ func main() {
 				parts := strings.SplitN(line, " PRIVMSG #awayto :", 2)
 				payload := parts[0]
 				message := parts[1]
+
+				var command string
+
+				if strings.HasPrefix(message, "!") {
+					commandParts := strings.SplitN(message, " ", 2)
+					command = strings.TrimPrefix(commandParts[0], "!")
+					message = commandParts[1]
+				}
+
 				contents := make(map[string]string)
 				payloadItems := strings.Split(payload[1:], ";")
 
@@ -336,12 +377,8 @@ func main() {
 					contents[toCamelCase(key)] = value
 				}
 
-				_ = message
-
-				rewardId, exists := contents["customRewardId"]
-				if exists {
-					println(rewardId)
-
+				rewardId, hasReward := contents["customRewardId"]
+				if hasReward {
 					var currentReward Reward
 
 					for _, reward := range rewards {
@@ -349,35 +386,93 @@ func main() {
 							currentReward = reward
 						}
 					}
+					command = currentReward.Title
+				}
 
-					println("reward: " + currentReward.Title)
+				if contents["displayName"] == os.Getenv("TWITCH_USER") {
 
-					if currentReward.Title == "TTS" {
+					if contains(adminCommands["ask"], strings.ToLower(command)) {
 
-						wavName := "wavs/" + contents["id"] + ".wav"
-						wavFile, err := os.Create(wavName)
+						data := struct {
+							Messages []struct {
+								Role    string `json:"role"`
+								Content string `json:"content"`
+							}
+							Model  string `json:"model"`
+							Stream bool   `json:"stream"`
+						}{
+							Messages: []struct {
+								Role    string `json:"role"`
+								Content string `json:"content"`
+							}{
+								{Role: "system", Content: "All prompts will be quickly and concisely responded to."},
+								{Role: "user", Content: message},
+							},
+							Model:  "mistral",
+							Stream: false,
+						}
+
+						jsonData, err := json.Marshal(data)
+						if err != nil {
+							panic(err)
+						}
+
+						// Create a new HTTP POST request with JSON body
+						req, err := http.NewRequest("POST", "http://localhost:11434/api/chat", bytes.NewBuffer(jsonData))
+						if err != nil {
+							panic(err)
+						}
+						req.Header.Set("Content-Type", "application/json")
+
+						print("1")
+						// Send the request
+						client := &http.Client{}
+						resp, err := client.Do(req)
+						if err != nil {
+							panic(err)
+						}
+						defer resp.Body.Close()
+
+						body, err := io.ReadAll(resp.Body)
 						if err != nil {
 							log.Fatal(err)
 						}
 
-						defer wavFile.Close()
+						print("2")
+						var chatRequest ChatRequest
 
-						data := url.Values{}
-						data.Set("text", message)
-
-						resp, _ := http.Get("http://localhost:5002/api/tts?" + data.Encode())
-						println(resp.Status)
-
-						_, err = io.Copy(wavFile, resp.Body)
-						if err != nil {
+						if err := json.Unmarshal(body, &chatRequest); err != nil {
 							log.Fatal(err)
 						}
 
-						aplayCmd := exec.Command("aplay", "-i", wavName)
-						if err := aplayCmd.Run(); err != nil {
-							log.Fatal(err)
-						}
+						print("hello?xxxxxxxxxX:" + chatRequest.Message.Content)
+					}
 
+				}
+
+				if contains(commands["tts"], strings.ToLower(command)) {
+					wavName := "wavs/" + contents["id"] + ".wav"
+					wavFile, err := os.Create(wavName)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					defer wavFile.Close()
+
+					data := url.Values{}
+					data.Set("text", message)
+
+					resp, _ := http.Get("http://localhost:5002/api/tts?" + data.Encode())
+					println(resp.Status)
+
+					_, err = io.Copy(wavFile, resp.Body)
+					if err != nil {
+						log.Fatal(err)
+					}
+
+					aplayCmd := exec.Command("aplay", "-i", wavName)
+					if err := aplayCmd.Run(); err != nil {
+						log.Fatal(err)
 					}
 
 				}

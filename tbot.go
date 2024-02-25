@@ -207,6 +207,19 @@ func getRewards(userId string) []Reward {
 	return rewardRequest.Data
 }
 
+func speak(message string) {
+	data := url.Values{}
+	data.Set("text", message)
+
+	resp, _ := http.Get("http://localhost:5002/api/tts?" + data.Encode())
+
+	aplayCmd := exec.Command("aplay")
+	aplayCmd.Stdin = resp.Body
+	if err := aplayCmd.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
 func toCamelCase(input string) string {
 	parts := strings.Split(input, "-")
 	for i, part := range parts {
@@ -394,17 +407,11 @@ func main() {
 					if contains(adminCommands["ask"], strings.ToLower(command)) {
 
 						data := struct {
-							Messages []struct {
-								Role    string `json:"role"`
-								Content string `json:"content"`
-							}
-							Model  string `json:"model"`
-							Stream bool   `json:"stream"`
+							Messages []Message `json:"messages"`
+							Model    string    `json:"model"`
+							Stream   bool      `json:"stream"`
 						}{
-							Messages: []struct {
-								Role    string `json:"role"`
-								Content string `json:"content"`
-							}{
+							Messages: []Message{
 								{Role: "system", Content: "All prompts will be quickly and concisely responded to."},
 								{Role: "user", Content: message},
 							},
@@ -417,15 +424,12 @@ func main() {
 							panic(err)
 						}
 
-						// Create a new HTTP POST request with JSON body
 						req, err := http.NewRequest("POST", "http://localhost:11434/api/chat", bytes.NewBuffer(jsonData))
 						if err != nil {
 							panic(err)
 						}
 						req.Header.Set("Content-Type", "application/json")
 
-						print("1")
-						// Send the request
 						client := &http.Client{}
 						resp, err := client.Do(req)
 						if err != nil {
@@ -438,39 +442,26 @@ func main() {
 							log.Fatal(err)
 						}
 
-						print("2")
 						var chatRequest ChatRequest
 
 						if err := json.Unmarshal(body, &chatRequest); err != nil {
 							log.Fatal(err)
 						}
 
-						print("hello?xxxxxxxxxX:" + chatRequest.Message.Content)
+						speak(chatRequest.Message.Content)
+						print("LLM:" + chatRequest.Message.Content)
 					}
 
 				}
 
 				if contains(commands["tts"], strings.ToLower(command)) {
-					wavName := "wavs/" + contents["id"] + ".wav"
-					wavFile, err := os.Create(wavName)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					defer wavFile.Close()
-
 					data := url.Values{}
 					data.Set("text", message)
 
 					resp, _ := http.Get("http://localhost:5002/api/tts?" + data.Encode())
-					println(resp.Status)
 
-					_, err = io.Copy(wavFile, resp.Body)
-					if err != nil {
-						log.Fatal(err)
-					}
-
-					aplayCmd := exec.Command("aplay", "-i", wavName)
+					aplayCmd := exec.Command("aplay")
+					aplayCmd.Stdin = resp.Body
 					if err := aplayCmd.Run(); err != nil {
 						log.Fatal(err)
 					}

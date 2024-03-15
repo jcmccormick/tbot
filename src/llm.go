@@ -51,9 +51,9 @@ type Message struct {
 }
 
 type LLMOpts struct {
-	// NumCtx int `json:"num_ctx"`
+	// NumCtx     int      `json:"num_ctx,omitempty"`
 	NumPredict int `json:"num_predict"`
-	// Stop []string `json:"stop"`
+	// Stop       []string `json:"stop,omitempty"`
 }
 
 var LLMOptDefaults = LLMOpts{
@@ -66,19 +66,20 @@ type LLMChatRequest struct {
 	Messages []Message `json:"messages"`
 	// Format   string    `json:"format"`
 	// System  string  `json:"system"`
-	Model   string  `json:"model"`
-	Stream  bool    `json:"stream"`
-	Options LLMOpts `json:"options"`
-	// KeepAlive string `json:"keep_alive"`
+	Model     string  `json:"model"`
+	Stream    bool    `json:"stream"`
+	Options   LLMOpts `json:"options"`
+	KeepAlive int     `json:"keep_alive"`
 }
 
 var LLMChatRequestDefaults = LLMChatRequest{
 	Messages: []Message{},
 	// Format:   "",
 	// System:  "",
-	Model:   "",
-	Stream:  false,
-	Options: LLMOptDefaults,
+	Model:     "",
+	Stream:    false,
+	Options:   LLMOptDefaults,
+	KeepAlive: 0,
 }
 
 type LLMGenerateRequest struct {

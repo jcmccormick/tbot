@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -147,4 +148,12 @@ func connectToChannel(conn net.Conn) {
 	fmt.Fprintf(conn, "PASS oauth:%s\r\n", string(chatToken))
 	fmt.Fprintf(conn, "NICK %s\r\n", user)
 	fmt.Fprintf(conn, "JOIN #%s\r\n", user)
+}
+
+func sendToChannel(conn net.Conn, channel string, message string) {
+	if len(message) > 500 {
+		message = message[0:499]
+	}
+	formatted := strings.Replace(message, "\n", " ", -1)
+	fmt.Fprintf(conn, "PRIVMSG #%s :%s\r\n", channel, formatted)
 }

@@ -20,6 +20,7 @@ func speak(message string) {
 
 	aplayCmd := exec.Command("aplay")
 	aplayCmd.Stdin = resp.Body
+
 	if err := aplayCmd.Run(); err != nil {
 		log.Fatal(err)
 	}

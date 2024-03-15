@@ -16,9 +16,17 @@ var commands = map[string][]string{
 	"tts":   {"tts", "t", "talk", "say", "v"},
 	"ask":   {"a"},
 	"queue": {"q", "queue", "queue song", "que", "song", "p", "play"},
+	"skip":  {"s", "skip"},
 }
 
 func main() {
+
+	convos := Convos{
+		Chatters: make(map[string]Convo),
+	}
+
+	chatRequest := LLMChatRequestDefaults
+	chatRequest.Model = "mistral"
 
 	var wg sync.WaitGroup
 
@@ -62,7 +70,7 @@ func main() {
 				fmt.Fprintf(conn, "%s\r\n", pongMsg)
 			} else if strings.Contains(line, "PRIVMSG") {
 
-				parts := strings.SplitN(line, " PRIVMSG #awayto :", 2)
+				parts := strings.SplitN(line, " PRIVMSG #"+user+" :", 2)
 
 				if len(parts) != 2 {
 					continue
@@ -71,12 +79,23 @@ func main() {
 				payload := parts[0]
 				message := parts[1]
 
+				if len(message) == 0 {
+					continue
+				}
+
+				// if getModeration(message) == "BAD" {
+				// 	println("MODERATED EVENT: " + line)
+				// 	continue
+				// }
+
 				var command string
 
 				if strings.HasPrefix(message, "!") {
 					commandParts := strings.SplitN(message, " ", 2)
 					command = strings.TrimPrefix(commandParts[0], "!")
-					message = commandParts[1]
+					if len(commandParts) > 1 {
+						message = commandParts[1]
+					}
 				}
 
 				contents := make(map[string]string)
@@ -101,33 +120,46 @@ func main() {
 					command = currentReward.Title
 				}
 
-				if contains(commands["ask"], strings.ToLower(command)) {
-					var cut string
-					m := postCompletion(message)
+				chatter := contents["displayName"]
+				command = strings.ToLower(command)
 
-					if len(m) > 500 {
-						cut = m[0:499]
-					} else {
-						cut = m
+				convos.AddUser(chatter)
+
+				if contains(commands["ask"], strings.ToLower(command)) {
+					convos.AddMessage(chatter, Message{Role: "user", Content: message})
+
+					var res []byte
+
+					chatRequest.Messages = convos.Chatters[chatter].Messages
+					GenerateChat(chatRequest, &res)
+
+					response := string(res)
+
+					idx := strings.LastIndex(response, ".")
+					if idx > -1 {
+						response = response[:idx]
 					}
 
-					fmt.Fprintf(conn, "PRIVMSG #%s :%s\r\n", user, cut)
-
-					speak(m)
+					convos.AddMessage(chatter, Message{Role: "assistant", Content: response})
+					sendToChannel(conn, user, response)
+					speak(response)
 				}
 
-				if contains(commands["tts"], strings.ToLower(command)) {
-					println("in tts")
+				if contains(commands["tts"], command) {
+					convos.AddMessage(chatter, Message{Role: "user", Content: message})
 					speak(message)
 				}
 
-				if contains(commands["queue"], strings.ToLower(command)) {
+				if contains(commands["queue"], command) {
 					queued := queueSong(message)
 					if len(queued) > 0 {
-						fmt.Fprintf(conn, "PRIVMSG #%s :%s\r\n", user, queued)
+						sendToChannel(conn, user, queued)
 					}
 				}
 
+				if contains(commands["skip"], command) {
+					nextSong()
+				}
 			}
 			// else if msgRegex.MatchString(line) {
 			// }
@@ -138,7 +170,7 @@ func main() {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			input := scanner.Text()
-			fmt.Fprintf(conn, "PRIVMSG #%s :%s\r\n", user, input)
+			sendToChannel(conn, user, input)
 		}
 	}()
 

@@ -7,7 +7,6 @@ You should respond with "OK" or "BAD" based on whether or not the message should
 You should respond in JSON using the following format: { "output": "OK" } or { "output": "BAD" }.
 You should never respond with anything else.
 You should not allow obviously bad remarks, hate speech, racism, etc.
-You should allow joking, objectionable stances, etc.
-You should only mark really egregious things as BAD; childish name calling and speech of that nature does not require moderation.
+You should allow joking, objectionable stances, infighting, etc; 98% of comments are OK.
 You should identify only truly hateful speech as BAD.
 """

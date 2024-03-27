@@ -1,13 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"time"
 )
+
+var MATCH_PATTERN = regexp.MustCompile("^[a-zA-Z0-9_]*$") // match Test_123
 
 func parseTimestamp(timestamp string) (string, string, error) {
 	var targetLayout string
@@ -31,20 +35,25 @@ func parseTimestamp(timestamp string) (string, string, error) {
 		return "", "", err
 	}
 
-	stopTime := startTime.Add(5 * time.Second)
+	stopTime := startTime.Add(7 * time.Second)
 
 	return startTime.Format(targetLayout), stopTime.Format(targetLayout), nil
 }
 
 func parseSoundName(user string, name string) string {
-	return "sounds/" + user + "_" + name + ".wav"
+	return "sounds/" + user + "_" + name + ".*"
 }
 
 func parseSoundNameAlternate(name string) string {
-	return "sounds/" + name + ".wav"
+	return "sounds/" + name + ".*"
 }
 
 func addSound(user string, name string, yturl string, timestamp string) string {
+
+	if !MATCH_PATTERN.MatchString(name) {
+		return "bad name, only letters and numbers"
+	}
+
 	soundName := parseSoundName(user, name)
 	if _, err := os.Stat(soundName); err == nil {
 		return "name already in use"
@@ -55,34 +64,26 @@ func addSound(user string, name string, yturl string, timestamp string) string {
 		return "bad time format, mm:ss or hh:mm:ss only"
 	}
 
-	duration := "\"*" + startTime + "-" + stopTime + "\""
-
 	_, err = url.ParseRequestURI(yturl)
 	if err != nil {
 		return "bad url"
 	}
 
-	ytdlpCmd := exec.Command("sh", "-c", "yt-dlp -q -x -o sounds/ytsound --force-keyframes-at-cuts --download-sections "+duration+" "+yturl)
+	duration := "\"*" + startTime + "-" + stopTime + "\""
+
+	ytdlpCmd := exec.Command("sh", "-c", "yt-dlp -q -x -o sounds/"+user+"_"+name+" --force-keyframes-at-cuts --download-sections "+duration+" "+yturl)
 	if err := ytdlpCmd.Run(); err != nil {
 		log.Fatal(err)
 	}
 
-	ffmpegCmd := exec.Command("sh", "-c", "ffmpeg -i sounds/ytsound.* "+soundName)
-	if err := ffmpegCmd.Run(); err != nil {
-		log.Fatal(err)
-	}
-
-	files, err := filepath.Glob("sounds/ytsound.*")
-	errCheck(err)
-
-	for _, file := range files {
-		os.Remove(file)
-	}
-
-	return name + " sound created, play it with !p " + name
+	return name + " sound created! you can play it with !p " + name + " -- others can play it with !p " + user + "_" + name
 }
 
 func playSound(user string, name string) {
+
+	if !MATCH_PATTERN.MatchString(name) {
+		return
+	}
 
 	var soundFile string
 
@@ -90,19 +91,21 @@ func playSound(user string, name string) {
 	// like !p user_hey as opposed to !p hey, which would play
 	// my own version of "hey", instead of a different user's
 	soundNameAlt := parseSoundNameAlternate(name)
-	if _, err := os.Stat(soundNameAlt); err == nil {
+	altFiles, _ := filepath.Glob(soundNameAlt)
+	if len(altFiles) > 0 {
 		soundFile = soundNameAlt
 	}
 
 	if len(soundFile) < 1 {
 		soundName := parseSoundName(user, name)
-		if _, err := os.Stat(soundName); err == nil {
+		soundFiles, _ := filepath.Glob(soundName)
+		if len(soundFiles) > 0 {
 			soundFile = soundName
 		}
 	}
 
 	if len(soundFile) > 0 {
-		aplayCmd := exec.Command("sh", "-c", "aplay "+soundFile)
+		aplayCmd := exec.Command("sh", "-c", "ffplay -autoexit -nodisp "+soundFile)
 		if err := aplayCmd.Run(); err != nil {
 			log.Fatal(err)
 		}
@@ -110,8 +113,16 @@ func playSound(user string, name string) {
 }
 
 func deleteSound(user string, name string) {
+	patternStr := fmt.Sprintf("/%s\\.", user+"_"+name)
+	patternMatcher := regexp.MustCompile(patternStr)
+
 	soundName := parseSoundName(user, name)
-	if _, err := os.Stat(soundName); err == nil {
-		os.Remove(soundName)
+	files, err := filepath.Glob(soundName)
+	errCheck(err)
+
+	for _, name := range files {
+		if patternMatcher.MatchString(name) {
+			os.Remove(name)
+		}
 	}
 }

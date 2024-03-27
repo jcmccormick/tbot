@@ -54,9 +54,17 @@ func addSound(user string, name string, yturl string, timestamp string) string {
 		return "bad name, only letters and numbers"
 	}
 
+	patternStr := fmt.Sprintf("/%s\\.", user+"_"+name)
+	patternMatcher := regexp.MustCompile(patternStr)
 	soundName := parseSoundName(user, name)
-	if _, err := os.Stat(soundName); err == nil {
-		return "name already in use"
+
+	files, err := filepath.Glob(soundName)
+	errCheck(err)
+
+	for _, name := range files {
+		if patternMatcher.MatchString(name) {
+			return "name already in use"
+		}
 	}
 
 	startTime, stopTime, err := parseTimestamp(timestamp)

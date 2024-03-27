@@ -148,7 +148,7 @@ func main() {
 				}
 
 				if contains(commands["del_sound"], strings.ToLower(command)) {
-					go deleteSound(user, message)
+					go deleteSound(chatter, message)
 				}
 
 				if contains(commands["ask"], strings.ToLower(command)) {

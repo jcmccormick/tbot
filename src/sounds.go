@@ -40,6 +40,10 @@ func parseSoundName(user string, name string) string {
 	return "sounds/" + user + "_" + name + ".wav"
 }
 
+func parseSoundNameAlternate(name string) string {
+	return "sounds/" + name + ".wav"
+}
+
 func addSound(user string, name string, yturl string, timestamp string) string {
 	soundName := parseSoundName(user, name)
 	if _, err := os.Stat(soundName); err == nil {
@@ -79,14 +83,29 @@ func addSound(user string, name string, yturl string, timestamp string) string {
 }
 
 func playSound(user string, name string) {
-	soundName := parseSoundName(user, name)
-	if _, err := os.Stat(soundName); err != nil {
-		return
+
+	var soundFile string
+
+	// First check if we want to play a different person's sound
+	// like !p user_hey as opposed to !p hey, which would play
+	// my own version of "hey", instead of a different user's
+	soundNameAlt := parseSoundNameAlternate(name)
+	if _, err := os.Stat(soundNameAlt); err == nil {
+		soundFile = soundNameAlt
 	}
 
-	aplayCmd := exec.Command("sh", "-c", "aplay "+soundName)
-	if err := aplayCmd.Run(); err != nil {
-		log.Fatal(err)
+	if len(soundFile) < 1 {
+		soundName := parseSoundName(user, name)
+		if _, err := os.Stat(soundName); err == nil {
+			soundFile = soundName
+		}
+	}
+
+	if len(soundFile) > 0 {
+		aplayCmd := exec.Command("sh", "-c", "aplay "+soundFile)
+		if err := aplayCmd.Run(); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 

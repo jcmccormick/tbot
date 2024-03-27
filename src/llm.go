@@ -58,7 +58,7 @@ type LLMOpts struct {
 
 var LLMOptDefaults = LLMOpts{
 	// NumCtx: 2046,
-	NumPredict: 100,
+	NumPredict: 75,
 	// Stop: []string{" ", "[INST]"},
 }
 

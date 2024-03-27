@@ -12,7 +12,7 @@ const (
 	ttsModel = "tts_models/en/ljspeech/vits"
 )
 
-func speak(message string) {
+func speak(message string) (*exec.Cmd, error) {
 	data := url.Values{}
 	data.Set("text", message)
 
@@ -21,13 +21,15 @@ func speak(message string) {
 	aplayCmd := exec.Command("aplay")
 	aplayCmd.Stdin = resp.Body
 
-	if err := aplayCmd.Run(); err != nil {
-		log.Fatal(err)
+	if err := aplayCmd.Start(); err != nil {
+		return nil, err
 	}
+
+	return aplayCmd, nil
 }
 
 func startTTSServer() {
-	ttsCmd := exec.Command("tts-server", "--use_cuda", "true", "--model_name", ttsModel)
+	ttsCmd := exec.Command("tts-server", "--model_name", ttsModel)
 	ttsErr := ttsCmd.Start()
 	if ttsErr != nil {
 		log.Fatal(ttsErr)

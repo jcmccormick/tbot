@@ -26,3 +26,8 @@ func (co *Convos) AddMessage(u string, m Message) {
 	}
 	co.Chatters[u] = Convo{Messages: append(msgs, m)}
 }
+
+func (co *Convos) ClearMessages(u string) {
+	println("clearing messages for", u)
+	co.Chatters[u] = Convo{}
+}

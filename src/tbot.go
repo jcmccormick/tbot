@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -13,20 +14,27 @@ import (
 )
 
 var commands = map[string][]string{
-	"tts":   {"tts", "t", "talk", "say", "v"},
-	"ask":   {"a"},
-	"queue": {"q", "queue", "queue song", "que", "song", "p", "play"},
-	"skip":  {"s", "skip"},
+	"tts":        {"tts", "t", "talk", "say"},
+	"ask":        {"a"},
+	"queue":      {"q", "queue"},
+	"skip":       {"s", "skip"},
+	"clear":      {"c", "clear"},
+	"add_sound":  {"as", "add_sound"},
+	"play_sound": {"p", "play", "play_sound"},
+	"del_sound":  {"ds", "del_sound"},
 }
 
 func main() {
+	user := os.Getenv("TWITCH_USER")
 
 	convos := Convos{
 		Chatters: make(map[string]Convo),
 	}
+	spokenTexts := make(chan string)
 
 	chatRequest := LLMChatRequestDefaults
-	chatRequest.Model = "mistral"
+	chatRequest.Options.NumPredict = 150
+	chatRequest.Model = "tbot-chat"
 
 	var wg sync.WaitGroup
 
@@ -56,8 +64,6 @@ func main() {
 	defer conn.Close()
 
 	connectToChannel(conn)
-
-	user := os.Getenv("TWITCH_USER")
 
 	go func() {
 		scanner := bufio.NewScanner(conn)
@@ -125,6 +131,26 @@ func main() {
 
 				convos.AddUser(chatter)
 
+				// if chatter == user {
+				//
+				// }
+				if contains(commands["add_sound"], strings.ToLower(command)) {
+					soundParts := strings.Split(message, " ")
+					if len(soundParts) < 3 {
+						continue
+					}
+					result := addSound(chatter, soundParts[0], soundParts[1], soundParts[2])
+					sendToChannel(conn, user, result)
+				}
+
+				if contains(commands["play_sound"], strings.ToLower(command)) {
+					go playSound(chatter, message)
+				}
+
+				if contains(commands["del_sound"], strings.ToLower(command)) {
+					go deleteSound(user, message)
+				}
+
 				if contains(commands["ask"], strings.ToLower(command)) {
 					convos.AddMessage(chatter, Message{Role: "user", Content: message})
 
@@ -142,12 +168,12 @@ func main() {
 
 					convos.AddMessage(chatter, Message{Role: "assistant", Content: response})
 					sendToChannel(conn, user, response)
-					speak(response)
+					spokenTexts <- response
 				}
 
 				if contains(commands["tts"], command) {
 					convos.AddMessage(chatter, Message{Role: "user", Content: message})
-					speak(message)
+					spokenTexts <- message
 				}
 
 				if contains(commands["queue"], command) {
@@ -155,6 +181,10 @@ func main() {
 					if len(queued) > 0 {
 						sendToChannel(conn, user, queued)
 					}
+				}
+
+				if contains(commands["clear"], command) {
+					convos.ClearMessages(chatter)
 				}
 
 				if contains(commands["skip"], command) {
@@ -166,11 +196,64 @@ func main() {
 		}
 	}()
 
+	// go func() {
+	// 	scanner := bufio.NewScanner(os.Stdin)
+	// 	for scanner.Scan() {
+	// 		input := scanner.Text()
+	// 		sendToChannel(conn, user, input)
+	// 	}
+	// }()
+
+	// everyone talks and feeds into the history,
+	//
+	var speechCmd *exec.Cmd
+	var err error
+
 	go func() {
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			input := scanner.Text()
-			sendToChannel(conn, user, input)
+		for spokenText := range spokenTexts {
+			speechCmd, err = speak(spokenText)
+			errCheck(err)
+		}
+	}()
+
+	voiceTexts := make(chan string)
+
+	go GetTextFromSpeech(voiceTexts)
+	go func() {
+		for voiceText := range voiceTexts {
+			print("SPOKEN WORD:", voiceText)
+
+			text := strings.ToLower(voiceText)
+
+			if strings.Contains(text, "stop") {
+				err := speechCmd.Process.Kill()
+				errCheck(err)
+			}
+
+			if strings.Contains(text, "clear") {
+				if strings.Contains(text, "history") {
+					convos.ClearMessages(user)
+				}
+			}
+
+			convos.AddMessage(user, Message{Role: "user", Content: text})
+
+			var res []byte
+
+			chatRequest.Messages = convos.Chatters[user].Messages
+			chatRequest.Options.NumPredict = 200
+			GenerateChat(chatRequest, &res)
+
+			response := string(res)
+
+			idx := strings.LastIndex(response, ".")
+			if idx > -1 {
+				response = response[:idx]
+			}
+
+			convos.AddMessage(user, Message{Role: "assistant", Content: response})
+
+			spokenTexts <- response
 		}
 	}()
 
